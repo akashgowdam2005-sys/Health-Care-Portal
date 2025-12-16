@@ -1,231 +1,96 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
-import Link from 'next/link'
-import { Header, Card, StatusBadge, Button } from '@/app/components/ui'
+import { createClient } from '@/lib/supabase/server';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Clock, User } from 'lucide-react';
+import { format } from 'date-fns';
+import PrescriptionDialog from '@/components/doctor/prescription-dialog';
 
 export default async function DoctorDashboard() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect('/login')
-  }
+  if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('name, role')
-    .eq('id', user.id)
-    .single()
+  const today = new Date().toISOString().split('T')[0];
 
-  if (!profile || profile.role !== 'DOCTOR') {
-    redirect('/login')
-  }
-
-  // Fetch today's appointments
-  const today = new Date()
-  const startOfDay = new Date(today.setHours(0, 0, 0, 0)).toISOString()
-  const endOfDay = new Date(today.setHours(23, 59, 59, 999)).toISOString()
-
-  const { data: todayAppointments } = await supabase
+  const { data: appointments } = await supabase
     .from('appointments')
     .select(`
-      id,
-      datetime,
-      status,
-      patient:patient_id (
-        name
-      )
+      *,
+      patient:profiles!appointments_patient_id_fkey(full_name, phone)
     `)
     .eq('doctor_id', user.id)
-    .gte('datetime', startOfDay)
-    .lte('datetime', endOfDay)
-    .eq('status', 'SCHEDULED')
-    .order('datetime', { ascending: true })
+    .eq('appointment_date', today)
+    .order('appointment_time', { ascending: true });
 
-  // Fetch upcoming appointments
-  const { data: upcomingAppointments } = await supabase
-    .from('appointments')
-    .select(`
-      id,
-      datetime,
-      status,
-      patient:patient_id (
-        name
-      )
-    `)
-    .eq('doctor_id', user.id)
-    .eq('status', 'SCHEDULED')
-    .gt('datetime', endOfDay)
-    .order('datetime', { ascending: true })
-    .limit(5)
-
-  // Fetch recent prescriptions
-  const { data: recentPrescriptions } = await supabase
-    .from('prescriptions')
-    .select(`
-      id,
-      date_issued,
-      filled_status,
-      patient:patient_id (
-        name
-      )
-    `)
-    .eq('doctor_id', user.id)
-    .order('date_issued', { ascending: false })
-    .limit(5)
+  const statusColors = {
+    pending: 'outline',
+    in_progress: 'warning',
+    completed: 'success',
+    cancelled: 'destructive',
+  } as const;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header 
-        title={`Welcome, Dr. ${profile.name}`} 
-        userName={profile.name} 
-        userRole="Doctor" 
-      />
-      
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          {/* Stats Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
-                      <span className="text-white text-sm font-bold">{todayAppointments?.length || 0}</span>
-                    </div>
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Today's Appointments</dt>
-                      <dd className="text-lg font-medium text-gray-900">Scheduled</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold">Today&apos;s Queue</h1>
+        <Badge variant="secondary">{format(new Date(), 'EEEE, MMMM d, yyyy')}</Badge>
+      </div>
 
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-                      <span className="text-white text-sm font-bold">{upcomingAppointments?.length || 0}</span>
+      <div className="grid gap-4">
+        {appointments?.length === 0 ? (
+          <Card>
+            <CardContent className="pt-6">
+              <p className="text-center text-muted-foreground">No appointments scheduled for today</p>
+            </CardContent>
+          </Card>
+        ) : (
+          appointments?.map((apt: any) => (
+            <Card key={apt.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <User className="h-5 w-5 text-primary" />
                     </div>
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Upcoming Appointments</dt>
-                      <dd className="text-lg font-medium text-gray-900">This Week</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white overflow-hidden shadow rounded-lg">
-              <div className="p-5">
-                <div className="flex items-center">
-                  <div className="flex-shrink-0">
-                    <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center">
-                      <span className="text-white text-sm font-bold">{recentPrescriptions?.length || 0}</span>
-                    </div>
-                  </div>
-                  <div className="ml-5 w-0 flex-1">
-                    <dl>
-                      <dt className="text-sm font-medium text-gray-500 truncate">Recent Prescriptions</dt>
-                      <dd className="text-lg font-medium text-gray-900">Last 5</dd>
-                    </dl>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Today's Appointments */}
-            <Card title="Today's Schedule">
-              {todayAppointments && todayAppointments.length > 0 ? (
-                <div className="space-y-3">
-                  {todayAppointments.map((appointment: any) => (
-                    <div key={appointment.id} className="border-l-4 border-blue-400 pl-4 py-2">
-                      <p className="text-sm font-medium text-gray-900">
-                        {appointment.patient?.name}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(appointment.datetime).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-gray-500">No appointments scheduled for today</p>
-              )}
-              <div className="mt-4">
-                <Link
-                  href="/doctor/appointments"
-                  className="text-indigo-600 hover:text-indigo-500 text-sm font-medium"
-                >
-                  View all appointments →
-                </Link>
-              </div>
-            </Card>
-
-            {/* Recent Prescriptions */}
-            <Card title="Recent Prescriptions">
-              {recentPrescriptions && recentPrescriptions.length > 0 ? (
-                <div className="space-y-3">
-                  {recentPrescriptions.map((prescription: any) => (
-                    <div key={prescription.id} className="border-l-4 border-green-400 pl-4 py-2">
-                      <p className="text-sm font-medium text-gray-900">
-                        {prescription.patient?.name}
-                      </p>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-gray-500">
-                          {new Date(prescription.date_issued).toLocaleDateString()}
-                        </p>
-                        <StatusBadge status={prescription.filled_status} type="prescription" />
+                    <div>
+                      <CardTitle className="text-lg">{apt.patient?.full_name}</CardTitle>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Clock className="h-4 w-4" />
+                        {apt.appointment_time}
                       </div>
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={statusColors[apt.status as keyof typeof statusColors]}>
+                      {apt.status.replace('_', ' ')}
+                    </Badge>
+                    {apt.status === 'pending' && <PrescriptionDialog appointment={apt} />}
+                  </div>
                 </div>
-              ) : (
-                <p className="text-gray-500">No recent prescriptions</p>
-              )}
-              <div className="mt-4">
-                <Link
-                  href="/doctor/prescriptions"
-                  className="text-indigo-600 hover:text-indigo-500 text-sm font-medium"
-                >
-                  View all prescriptions →
-                </Link>
-              </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <div>
+                    <span className="text-sm font-medium">Reason:</span>
+                    <p className="text-sm text-muted-foreground">{apt.reason}</p>
+                  </div>
+                  {apt.notes && (
+                    <div>
+                      <span className="text-sm font-medium">Notes:</span>
+                      <p className="text-sm text-muted-foreground">{apt.notes}</p>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-sm font-medium">Contact:</span>
+                    <p className="text-sm text-muted-foreground">{apt.patient?.phone || 'N/A'}</p>
+                  </div>
+                </div>
+              </CardContent>
             </Card>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="mt-8">
-            <Card title="Quick Actions">
-              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <Button href="/doctor/appointments" variant="primary">
-                  View Appointments
-                </Button>
-                <Button href="/doctor/patients" variant="secondary">
-                  Patient Records
-                </Button>
-                <Button href="/doctor/prescriptions" variant="secondary">
-                  Prescriptions
-                </Button>
-                <Button href="/doctor/profile" variant="secondary">
-                  Update Profile
-                </Button>
-              </div>
-            </Card>
-          </div>
-        </div>
-      </main>
+          ))
+        )}
+      </div>
     </div>
-  )
+  );
 }
